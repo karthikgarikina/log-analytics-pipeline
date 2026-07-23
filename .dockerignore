@@ -1,0 +1,6 @@
+.git
+data
+benchmark_results.txt
+__pycache__
+*.pyc
+.env

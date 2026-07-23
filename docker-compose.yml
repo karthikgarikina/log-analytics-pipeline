@@ -1,0 +1,94 @@
+x-common-env: &common-env
+  DATA_DIR: ${DATA_DIR:-/app/data}
+  REPORTS_DIR: ${REPORTS_DIR:-/app/reports}
+  INGESTOR_URL: ${INGESTOR_URL:-http://ingestor:8000/logs}
+  INGESTOR_BATCH_URL: ${INGESTOR_BATCH_URL:-http://ingestor:8000/logs/batch}
+  INDEXER_URL: ${INDEXER_URL:-http://indexer:8001}
+  BUFFER_WINDOW_SECONDS: ${BUFFER_WINDOW_SECONDS:-10}
+  BATCH_SIZE: ${BATCH_SIZE:-500}
+  INDEXER_POLL_SECONDS: ${INDEXER_POLL_SECONDS:-1}
+  LOG_RATE_PER_SECOND: ${LOG_RATE_PER_SECOND:-5}
+  LOG_JITTER_SECONDS: ${LOG_JITTER_SECONDS:-30}
+  LOG_DUPLICATE_PROBABILITY: ${LOG_DUPLICATE_PROBABILITY:-0.02}
+  LOG_GENERATOR_TOTAL: ${LOG_GENERATOR_TOTAL:-0}
+  SEEN_ID_CACHE_SIZE: ${SEEN_ID_CACHE_SIZE:-200000}
+  REPORT_HOUR_UTC: ${REPORT_HOUR_UTC:-0}
+  REPORT_MINUTE_UTC: ${REPORT_MINUTE_UTC:-5}
+  RUN_REPORT_ON_START: ${RUN_REPORT_ON_START:-true}
+
+services:
+  ingestor:
+    build: .
+    command: ["python", "-m", "app.ingestor"]
+    environment:
+      <<: *common-env
+      INGESTOR_HOST: 0.0.0.0
+      INGESTOR_PORT: 8000
+    ports:
+      - "${INGESTOR_PORT:-8000}:8000"
+    volumes:
+      - ./data/docs:${DATA_DIR:-/app/data}/docs
+      - ./data/index:${DATA_DIR:-/app/data}/index
+      - ./reports:${REPORTS_DIR:-/app/reports}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  indexer:
+    build: .
+    command: ["python", "-m", "app.indexer"]
+    environment:
+      <<: *common-env
+      INDEXER_HOST: 0.0.0.0
+      INDEXER_PORT: 8001
+    depends_on:
+      ingestor:
+        condition: service_healthy
+    ports:
+      - "${INDEXER_PORT:-8001}:8001"
+    volumes:
+      - ./data/docs:${DATA_DIR:-/app/data}/docs
+      - ./data/index:${DATA_DIR:-/app/data}/index
+      - ./reports:${REPORTS_DIR:-/app/reports}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  log-generator:
+    build: .
+    command: ["python", "-m", "app.generator"]
+    environment:
+      <<: *common-env
+    depends_on:
+      ingestor:
+        condition: service_healthy
+
+  scheduler:
+    build: .
+    command: ["python", "-m", "app.scheduler"]
+    environment:
+      <<: *common-env
+    depends_on:
+      indexer:
+        condition: service_healthy
+    volumes:
+      - ./reports:${REPORTS_DIR:-/app/reports}
+
+  querier:
+    build: .
+    command: ["tail", "-f", "/dev/null"]
+    environment:
+      <<: *common-env
+    depends_on:
+      indexer:
+        condition: service_healthy
+    volumes:
+      - ./data/docs:${DATA_DIR:-/app/data}/docs:ro
+      - ./data/index:${DATA_DIR:-/app/data}/index:ro
+      - ./reports:${REPORTS_DIR:-/app/reports}:ro
