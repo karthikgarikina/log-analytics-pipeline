@@ -2,7 +2,7 @@
 set -euo pipefail
 
 KEYWORD="${BENCHMARK_KEYWORD:-database}"
-COUNT=1000
+COUNT=10000
 WORKERS="${BENCHMARK_WORKERS:-16}"
 RESULTS_FILE="benchmark_results.txt"
 
